@@ -188,47 +188,50 @@ scene.add(sphere);
 sceneObjects.push(sphere);
 
 // Object 5: Torus with custom GLSL shader (Part 3)
-const torusGeometry = new THREE.TorusGeometry(0.6, 0.25, 16, 100);
+const torusGeometry = new THREE.TorusGeometry(0.8, 0.3, 32, 100);
 
-// Custom shader material with animated wave effect
-const shaderMaterial = new THREE.ShaderMaterial({
+// Custom shader material with animated color effect
+const torusShaderMaterial = new THREE.ShaderMaterial({
     uniforms: {
-        time: { value: 0 },
-        color1: { value: new THREE.Color(0x00ffff) },
-        color2: { value: new THREE.Color(0xff00ff) }
+        uTime: { value: 0.0 }
     },
     vertexShader: `
-        uniform float time;
+        uniform float uTime;
         varying vec2 vUv;
+        varying vec3 vNormal;
         varying vec3 vPosition;
         
         void main() {
             vUv = uv;
+            vNormal = normal;
             vPosition = position;
             
-            // Create wave effect
+            // Wave deformation
             vec3 pos = position;
-            float wave = sin(position.x * 5.0 + time) * 0.1;
-            pos.z += wave;
+            pos += normal * sin(pos.x * 5.0 + uTime * 3.0) * 0.1;
+            pos += normal * sin(pos.y * 4.0 + uTime * 2.0) * 0.05;
             
             gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
     `,
     fragmentShader: `
-        uniform float time;
-        uniform vec3 color1;
-        uniform vec3 color2;
+        uniform float uTime;
         varying vec2 vUv;
+        varying vec3 vNormal;
         varying vec3 vPosition;
         
+        // HSV to RGB conversion
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        
         void main() {
-            // Animated gradient based on position and time
-            float mixValue = sin(vPosition.x * 3.0 + time) * 0.5 + 0.5;
-            vec3 color = mix(color1, color2, mixValue);
+            // Fast rainbow cycle - complete cycle every 5 seconds
+            float hue = fract(uTime * 0.2);
             
-            // Add pulsing effect
-            float pulse = sin(time * 2.0) * 0.2 + 0.8;
-            color *= pulse;
+            vec3 color = hsv2rgb(vec3(hue, 1.0, 1.0));
             
             gl_FragColor = vec4(color, 1.0);
         }
@@ -236,13 +239,25 @@ const shaderMaterial = new THREE.ShaderMaterial({
     side: THREE.DoubleSide
 });
 
-const torus = new THREE.Mesh(torusGeometry, shaderMaterial);
-torus.position.set(0, 1.5, -2);
-torus.userData.name = 'Тор (GLSL шейдер)';
-torus.userData.id = 'torus';
-torus.userData.isShaderObject = true;
-scene.add(torus);
-sceneObjects.push(torus);
+console.log('Shader material created with uniforms:', torusShaderMaterial.uniforms);
+
+const torusMesh = new THREE.Mesh(torusGeometry, torusShaderMaterial);
+torusMesh.position.set(-3, 1.5, 2);
+torusMesh.rotation.x = Math.PI / 4;
+torusMesh.userData.name = 'Тор (GLSL шейдер)';
+torusMesh.userData.id = 'torus';
+torusMesh.userData.isShaderObject = true;
+
+// Use onBeforeRender to update uniform - guaranteed to work
+torusMesh.onBeforeRender = function(renderer, scene, camera) {
+    const time = performance.now() * 0.001;
+    this.material.uniforms.uTime.value = time;
+};
+
+scene.add(torusMesh);
+sceneObjects.push(torusMesh);
+
+console.log('Shader torus created with onBeforeRender callback');
 
 // Helper function to create a checker texture
 function createCheckerTexture() {
@@ -678,13 +693,9 @@ function animate() {
     pointLight.position.z = Math.cos(time) * 3;
     pointLightHelper.position.copy(pointLight.position);
     
-    // Update shader time uniform (Part 3)
-    const torus = sceneObjects.find(obj => obj.userData.id === 'torus');
-    if (torus && torus.material.uniforms) {
-        torus.material.uniforms.time.value = time;
-        torus.rotation.x += 0.01;
-        torus.rotation.y += 0.005;
-    }
+    // Rotate torus (Part 3) - uniform is updated via onBeforeRender
+    torusMesh.rotation.x += 0.01;
+    torusMesh.rotation.y += 0.005;
     
     controls.update();
     renderer.render(scene, camera);
