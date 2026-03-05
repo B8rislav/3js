@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -25,6 +29,18 @@ document.getElementById('canvas-container').appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
+
+// TransformControls
+const transformControls = new TransformControls(camera, renderer.domElement);
+transformControls.addEventListener('dragging-changed', (event) => {
+    controls.enabled = !event.value;
+});
+scene.add(transformControls);
+
+// Object management
+const sceneObjects = [];
+let selectedObject = null;
+let objectCounter = 0;
 
 // Lights
 // 1. Ambient Light
@@ -61,13 +77,13 @@ scene.add(pointLightHelper);
 const textureLoader = new THREE.TextureLoader();
 const checkerTexture = createCheckerTexture();
 
-// Object 1: Textured Plane (using BufferGeometry)
+// Object 1: Textured Ground Plane (using BufferGeometry)
 const planeGeometry = new THREE.BufferGeometry();
 const planeVertices = new Float32Array([
-    -5, 0, -5,
-    5, 0, -5,
-    5, 0, 5,
-    -5, 0, 5
+    -5, -0.1, -5,
+    5, -0.1, -5,
+    5, -0.1, 5,
+    -5, -0.1, 5
 ]);
 const planeIndices = [0, 1, 2, 0, 2, 3];
 const planeUVs = new Float32Array([
@@ -94,7 +110,10 @@ const planeMaterial = new THREE.MeshStandardMaterial({
 });
 const plane = new THREE.Mesh(planeGeometry, planeMaterial);
 plane.receiveShadow = true;
+plane.userData.name = 'Плоскость';
+plane.userData.id = 'plane';
 scene.add(plane);
+sceneObjects.push(plane);
 
 // Object 2: Pyramid (using BufferGeometry)
 const pyramidGeometry = new THREE.BufferGeometry();
@@ -128,10 +147,13 @@ const pyramidMaterial = new THREE.MeshStandardMaterial({
     flatShading: true
 });
 const pyramid = new THREE.Mesh(pyramidGeometry, pyramidMaterial);
-pyramid.position.set(-2, 0, 0);
+pyramid.position.set(-2, 0.01, 0); // Slightly above ground to prevent z-fighting
 pyramid.castShadow = true;
 pyramid.receiveShadow = true;
+pyramid.userData.name = 'Пирамида';
+pyramid.userData.id = 'pyramid';
 scene.add(pyramid);
+sceneObjects.push(pyramid);
 
 // Object 3: Cube (standard geometry)
 const cubeGeometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
@@ -144,7 +166,10 @@ const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
 cube.position.set(2, 0.75, 0);
 cube.castShadow = true;
 cube.receiveShadow = true;
+cube.userData.name = 'Куб';
+cube.userData.id = 'cube';
 scene.add(cube);
+sceneObjects.push(cube);
 
 // Object 4: Sphere (standard geometry)
 const sphereGeometry = new THREE.SphereGeometry(0.8, 32, 32);
@@ -157,7 +182,10 @@ const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
 sphere.position.set(0, 0.8, 2.5);
 sphere.castShadow = true;
 sphere.receiveShadow = true;
+sphere.userData.name = 'Сфера';
+sphere.userData.id = 'sphere';
 scene.add(sphere);
+sceneObjects.push(sphere);
 
 // Helper function to create a checker texture
 function createCheckerTexture() {
@@ -235,6 +263,345 @@ pyramidColorPicker.addEventListener('input', (e) => {
 sphereColorPicker.addEventListener('input', (e) => {
     sphereMaterial.color.setStyle(e.target.value);
 });
+
+// Model loading functionality
+const gltfLoader = new GLTFLoader();
+const objLoader = new OBJLoader();
+const stlLoader = new STLLoader();
+
+function loadModel(file) {
+    const extension = file.name.split('.').pop().toLowerCase();
+    
+    // Validate file extension
+    const supportedFormats = ['gltf', 'glb', 'obj', 'stl'];
+    if (!supportedFormats.includes(extension)) {
+        alert('Неподдерживаемый формат файла. Поддерживаются: ' + supportedFormats.join(', '));
+        return;
+    }
+    
+    // Create object URL for the file
+    const url = URL.createObjectURL(file);
+    
+    try {
+        switch (extension) {
+            case 'gltf':
+            case 'glb':
+                loadGLTF(url, file.name);
+                break;
+            case 'obj':
+                loadOBJ(url, file.name);
+                break;
+            case 'stl':
+                loadSTL(url, file.name);
+                break;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки модели:', error);
+        alert('Ошибка загрузки модели: ' + error.message);
+        URL.revokeObjectURL(url);
+    }
+}
+
+function loadGLTF(url, filename) {
+    gltfLoader.load(
+        url,
+        (gltf) => {
+            const model = gltf.scene;
+            
+            // Check if model has any meshes
+            let hasMeshes = false;
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    hasMeshes = true;
+                }
+            });
+            
+            if (!hasMeshes) {
+                console.warn('GLTF файл не содержит мешей');
+                alert('GLTF файл загружен, но не содержит видимых объектов');
+            }
+            
+            setupLoadedModel(model, filename);
+            URL.revokeObjectURL(url);
+        },
+        (progress) => {
+            if (progress.total > 0) {
+                console.log('Загрузка:', (progress.loaded / progress.total * 100).toFixed(0) + '%');
+            }
+        },
+        (error) => {
+            console.error('Ошибка загрузки GLTF:', error);
+            let errorMsg = 'Ошибка загрузки GLTF файла.\n';
+            if (error.message) {
+                errorMsg += 'Детали: ' + error.message;
+            } else {
+                errorMsg += 'Возможно, файл поврежден или имеет внешние зависимости (текстуры, .bin файлы).\n';
+                errorMsg += 'Попробуйте использовать GLB формат (все в одном файле).';
+            }
+            alert(errorMsg);
+            URL.revokeObjectURL(url);
+        }
+    );
+}
+
+function loadOBJ(url, filename) {
+    objLoader.load(
+        url,
+        (model) => {
+            setupLoadedModel(model, filename);
+            URL.revokeObjectURL(url);
+        },
+        (progress) => {
+            console.log('Загрузка:', (progress.loaded / progress.total * 100).toFixed(0) + '%');
+        },
+        (error) => {
+            console.error('Ошибка загрузки OBJ:', error);
+            alert('Ошибка загрузки OBJ файла');
+            URL.revokeObjectURL(url);
+        }
+    );
+}
+
+function loadSTL(url, filename) {
+    stlLoader.load(
+        url,
+        (geometry) => {
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x888888,
+                roughness: 0.5,
+                metalness: 0.3
+            });
+            const model = new THREE.Mesh(geometry, material);
+            setupLoadedModel(model, filename);
+            URL.revokeObjectURL(url);
+        },
+        (progress) => {
+            console.log('Загрузка:', (progress.loaded / progress.total * 100).toFixed(0) + '%');
+        },
+        (error) => {
+            console.error('Ошибка загрузки STL:', error);
+            alert('Ошибка загрузки STL файла');
+            URL.revokeObjectURL(url);
+        }
+    );
+}
+
+function setupLoadedModel(model, filename) {
+    // Center and scale the model
+    const box = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 2 / maxDim;
+    
+    model.position.sub(center);
+    model.scale.multiplyScalar(scale);
+    model.position.y = 1;
+    
+    // Enable shadows
+    model.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+    
+    // Add to scene
+    objectCounter++;
+    model.userData.name = filename.replace(/\.[^/.]+$/, '');
+    model.userData.id = 'loaded_' + objectCounter;
+    scene.add(model);
+    sceneObjects.push(model);
+    
+    // Update object selector
+    updateObjectSelector();
+    
+    console.log('Модель загружена:', filename);
+}
+
+// File input handler
+const modelInput = document.getElementById('modelInput');
+modelInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        loadModel(file);
+        e.target.value = ''; // Reset input
+    }
+});
+
+// Drag and drop handlers
+const dropZone = document.getElementById('drop-zone');
+
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    
+    const file = e.dataTransfer.files[0];
+    if (file) {
+        loadModel(file);
+    }
+});
+
+dropZone.addEventListener('click', () => {
+    modelInput.click();
+});
+
+// Object selection and transformation
+const objectSelect = document.getElementById('objectSelect');
+const posXInput = document.getElementById('posX');
+const posYInput = document.getElementById('posY');
+const posZInput = document.getElementById('posZ');
+const rotXInput = document.getElementById('rotX');
+const rotYInput = document.getElementById('rotY');
+const rotZInput = document.getElementById('rotZ');
+const scaleXInput = document.getElementById('scaleX');
+const scaleYInput = document.getElementById('scaleY');
+const scaleZInput = document.getElementById('scaleZ');
+const applyTransformBtn = document.getElementById('applyTransform');
+
+function updateObjectSelector() {
+    objectSelect.innerHTML = '<option value="">-- Выберите объект --</option>';
+    sceneObjects.forEach((obj) => {
+        const option = document.createElement('option');
+        option.value = obj.userData.id;
+        option.textContent = obj.userData.name;
+        objectSelect.appendChild(option);
+    });
+}
+
+function updateTransformInputs() {
+    if (selectedObject) {
+        posXInput.value = selectedObject.position.x.toFixed(2);
+        posYInput.value = selectedObject.position.y.toFixed(2);
+        posZInput.value = selectedObject.position.z.toFixed(2);
+        
+        rotXInput.value = THREE.MathUtils.radToDeg(selectedObject.rotation.x).toFixed(0);
+        rotYInput.value = THREE.MathUtils.radToDeg(selectedObject.rotation.y).toFixed(0);
+        rotZInput.value = THREE.MathUtils.radToDeg(selectedObject.rotation.z).toFixed(0);
+        
+        scaleXInput.value = selectedObject.scale.x.toFixed(2);
+        scaleYInput.value = selectedObject.scale.y.toFixed(2);
+        scaleZInput.value = selectedObject.scale.z.toFixed(2);
+    } else {
+        posXInput.value = '';
+        posYInput.value = '';
+        posZInput.value = '';
+        rotXInput.value = '';
+        rotYInput.value = '';
+        rotZInput.value = '';
+        scaleXInput.value = '';
+        scaleYInput.value = '';
+        scaleZInput.value = '';
+    }
+}
+
+objectSelect.addEventListener('change', (e) => {
+    const objectId = e.target.value;
+    
+    if (objectId) {
+        selectedObject = sceneObjects.find(obj => obj.userData.id === objectId);
+        if (selectedObject) {
+            transformControls.attach(selectedObject);
+            updateTransformInputs();
+        }
+    } else {
+        selectedObject = null;
+        transformControls.detach();
+        updateTransformInputs();
+    }
+});
+
+applyTransformBtn.addEventListener('click', () => {
+    if (selectedObject) {
+        const posX = parseFloat(posXInput.value);
+        const posY = parseFloat(posYInput.value);
+        const posZ = parseFloat(posZInput.value);
+        const rotX = parseFloat(rotXInput.value);
+        const rotY = parseFloat(rotYInput.value);
+        const rotZ = parseFloat(rotZInput.value);
+        const scaleX = parseFloat(scaleXInput.value);
+        const scaleY = parseFloat(scaleYInput.value);
+        const scaleZ = parseFloat(scaleZInput.value);
+        
+        if (!isNaN(posX)) selectedObject.position.x = posX;
+        if (!isNaN(posY)) selectedObject.position.y = posY;
+        if (!isNaN(posZ)) selectedObject.position.z = posZ;
+        
+        if (!isNaN(rotX)) selectedObject.rotation.x = THREE.MathUtils.degToRad(rotX);
+        if (!isNaN(rotY)) selectedObject.rotation.y = THREE.MathUtils.degToRad(rotY);
+        if (!isNaN(rotZ)) selectedObject.rotation.z = THREE.MathUtils.degToRad(rotZ);
+        
+        if (!isNaN(scaleX)) selectedObject.scale.x = scaleX;
+        if (!isNaN(scaleY)) selectedObject.scale.y = scaleY;
+        if (!isNaN(scaleZ)) selectedObject.scale.z = scaleZ;
+    }
+});
+
+// Click to select object
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', (event) => {
+    // Calculate mouse position in normalized device coordinates
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(sceneObjects, true);
+    
+    if (intersects.length > 0) {
+        let clickedObject = intersects[0].object;
+        
+        // Find the root object in sceneObjects
+        while (clickedObject.parent && !sceneObjects.includes(clickedObject)) {
+            clickedObject = clickedObject.parent;
+        }
+        
+        if (sceneObjects.includes(clickedObject)) {
+            selectedObject = clickedObject;
+            objectSelect.value = clickedObject.userData.id;
+            transformControls.attach(selectedObject);
+            updateTransformInputs();
+        }
+    }
+});
+
+// Update transform inputs when object is moved via TransformControls
+transformControls.addEventListener('objectChange', () => {
+    updateTransformInputs();
+});
+
+// Keyboard shortcuts for transform modes
+window.addEventListener('keydown', (event) => {
+    if (selectedObject) {
+        switch (event.key) {
+            case 'g':
+            case 'G':
+                transformControls.setMode('translate');
+                break;
+            case 'r':
+            case 'R':
+                transformControls.setMode('rotate');
+                break;
+            case 's':
+            case 'S':
+                transformControls.setMode('scale');
+                break;
+        }
+    }
+});
+
+// Initialize object selector
+updateObjectSelector();
 
 // Animation loop
 function animate() {
