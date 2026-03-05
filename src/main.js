@@ -187,6 +187,63 @@ sphere.userData.id = 'sphere';
 scene.add(sphere);
 sceneObjects.push(sphere);
 
+// Object 5: Torus with custom GLSL shader (Part 3)
+const torusGeometry = new THREE.TorusGeometry(0.6, 0.25, 16, 100);
+
+// Custom shader material with animated wave effect
+const shaderMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        time: { value: 0 },
+        color1: { value: new THREE.Color(0x00ffff) },
+        color2: { value: new THREE.Color(0xff00ff) }
+    },
+    vertexShader: `
+        uniform float time;
+        varying vec2 vUv;
+        varying vec3 vPosition;
+        
+        void main() {
+            vUv = uv;
+            vPosition = position;
+            
+            // Create wave effect
+            vec3 pos = position;
+            float wave = sin(position.x * 5.0 + time) * 0.1;
+            pos.z += wave;
+            
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+    `,
+    fragmentShader: `
+        uniform float time;
+        uniform vec3 color1;
+        uniform vec3 color2;
+        varying vec2 vUv;
+        varying vec3 vPosition;
+        
+        void main() {
+            // Animated gradient based on position and time
+            float mixValue = sin(vPosition.x * 3.0 + time) * 0.5 + 0.5;
+            vec3 color = mix(color1, color2, mixValue);
+            
+            // Add pulsing effect
+            float pulse = sin(time * 2.0) * 0.2 + 0.8;
+            color *= pulse;
+            
+            gl_FragColor = vec4(color, 1.0);
+        }
+    `,
+    side: THREE.DoubleSide
+});
+
+const torus = new THREE.Mesh(torusGeometry, shaderMaterial);
+torus.position.set(0, 1.5, -2);
+torus.userData.name = 'Тор (GLSL шейдер)';
+torus.userData.id = 'torus';
+torus.userData.isShaderObject = true;
+scene.add(torus);
+sceneObjects.push(torus);
+
 // Helper function to create a checker texture
 function createCheckerTexture() {
     const canvas = document.createElement('canvas');
@@ -620,6 +677,14 @@ function animate() {
     pointLight.position.x = Math.sin(time) * 3;
     pointLight.position.z = Math.cos(time) * 3;
     pointLightHelper.position.copy(pointLight.position);
+    
+    // Update shader time uniform (Part 3)
+    const torus = sceneObjects.find(obj => obj.userData.id === 'torus');
+    if (torus && torus.material.uniforms) {
+        torus.material.uniforms.time.value = time;
+        torus.rotation.x += 0.01;
+        torus.rotation.y += 0.005;
+    }
     
     controls.update();
     renderer.render(scene, camera);
